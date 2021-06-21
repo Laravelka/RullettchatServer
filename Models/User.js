@@ -1,5 +1,6 @@
 const { Model } = require('@phpixel/node-eloquent');
 
+const knex = require('./../helpers/knex');
 const ChatMessages = require('./ChatMessages');
 
 class User extends Model {
@@ -11,8 +12,22 @@ class User extends Model {
 		return this.hasMany(ChatMessages);
 	}
 
-	async find(id, select = '*') {
-		return await User.select(select).where({ id: id }).get();
+	async find(value, select = '*') {
+		if (Object.is(value)) {
+			return await knex(User.tableName())
+				.select(select)
+				.where(value);
+		} else {
+			return await knex(User.tableName())
+				.select(select)
+				.where({ id: value });
+		}
+	}
+
+	async updateToken(id, token) {
+		return await knex(User.tableName())
+			.where({ id: id })
+			.update({ token: token });
 	}
 }
 

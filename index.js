@@ -1,5 +1,6 @@
 require('dotenv').config();
 
+const redis = require("redis");
 const winston = require('winston');
 const logger = winston.createLogger({
 	transports: [
@@ -36,87 +37,138 @@ const io = require('socket.io')(http, {
 		methods: ["GET", "POST"]
 	}
 });
-const signalServer = require('simple-signal-server')(io);
+const subscriber = redis.createClient(6378, 'localhost');
+const peerServer = require('webrtc-peer-server')(io);
 
-function message (userId, data, event = 'message') {
-	return io.sockets.to(userId).emit(event, data);
+subscriber.subscribe("onLogin");
+
+function send(socket, userId, data, event = 'message') {
+	return socket.broadcast.to(userId).emit(event, data);
 }
 
-function getRealSocketId(id) {
-	if (io.sockets.sockets.has(id)) {
-		return io.sockets.sockets.get(id).client.id;
+function sendAll(data, event = 'message') {
+	io.emit(event, data);
+}
+
+const arrAllIds = new Set(); // все
+const arrCommunicatingIds = new Set(); // уже общаются
+
+peerServer.on('connect', async(socket) => {
+	const { id } = socket;
+	const { token } = socket.handshake.query;
+	const checkUserToken = await (new UserModel).find({ token: token });
+
+	console.log('connect::', id, checkUserToken);
+
+	if (checkUserToken[0] !== undefined) {
+		const user = checkUserToken[0];
+
+		if (arrAllIds.has(user.id)) {
+			socket.emit('errorMessage', {
+				type: 'two_window',
+				text: 'Нельзя открывать вторую вкладку!'
+			});
+			socket.disconnect(true);
+		} else {
+			delete user.password;
+
+			socket.data = user;
+			arrAllIds.add(user.id, socket);
+
+			io.emit('updateOnline', {
+				all: Array.from(arrAllIds).length,
+				communicating: Array.from(arrCommunicatingIds).length
+			});
+		}
 	} else {
-		return false;
-	}
-}
+		subscriber.on("message", function(channel, message) {
+			console.log(channel, JSON.parse(message));
 
-const allIDs = new Set();
-signalServer.on('discover', (request) => {
+			if (channel == 'onLogin') {
+				const user = JSON.parse(message);
+
+				if (arrAllIds.has(user.id)) {
+					socket.emit('errorMessage', {
+						type: 'two_window',
+						text: 'Нельзя открывать вторую вкладку!'
+					});
+					socket.disconnect(true);
+				} else {
+					delete user.password;
+
+					socket.data = user;
+					arrAllIds.add(user.id, socket);
+
+					socket.emit('login', user);
+
+					io.emit('updateOnline', {
+						all: Array.from(arrAllIds).length,
+						communicating: Array.from(arrCommunicatingIds).length
+					});
+				}
+			}
+		});
+		console.log(`socket.io err auth: ${id}`, [token]);
+	}
+
+	socket.on('disconnect', (type) => {
+		console.log('уходит:', socket.data)
+
+		arrAllIds.delete(socket.data.id);
+
+		io.emit('updateOnline', {
+			all: Array.from(arrAllIds).length,
+			communicating: Array.from(arrCommunicatingIds).length
+		});
+		console.log('disconnect:', socket.data.name, socket.id);
+	});
+});
+
+peerServer.on('discover', (request) => {
 	const { socket } = request;
 
-	const clientID = socket.id;
+	arrCommunicatingIds.add(socket.id, socket.data);
 
-	allIDs.add(clientID);
-
-	request.discover(Array.from(allIDs));
-
-	console.log('discovered:', clientID);
+	request.discover(Array.from(arrCommunicatingIds));
 });
 
-signalServer.on('disconnect', (socket) => {
-	const clientID = socket.id;
-
-	allIDs.delete(clientID);
-
-	console.log('disconnect: ', clientID);
-});
-
-signalServer.on('destroy', (socket) => {
-	const clientID = socket.id;
-
-	console.log('destroy: ', clientID);
-});
-
-signalServer.on('request', (request) => {
+peerServer.on('request', (request) => {
 	const { socket } = request;
 
 	request.forward();
 
-	message(request.initiator, 'Звоним к ' + request.target);
-	message(request.target, 'Звонят от ' + request.initiator);
+	console.log(request.initiator, 'звонит к ', request.target);
 });
 
-const arrIds = new Set();
-io.on("connection", async(socket) => {
-	const { id } = socket.client;
-	const { token } = socket.handshake.query;
-	const checkUserToken = await (new UserModel).find({ token: token });
+peerServer.on('message', (socket, request) => {
+	const { target, message } = request;
 
-	socket.on('message', (data) => {
-		// const socketId = getRealSocketId(data.id);
-
-		message(data.id, data.text);
-
-		console.log('message:', data);
-	});
-
-	if (checkUserToken[0]) {
-		arrIds.add({socketId: id, user: checkUserToken[0]});
-
-		delete checkUserToken[0].password;
-
-		console.log(`socket.io connected: ${id}`, checkUserToken[0]);
-
-		allIDs.forEach((item) => {
-			const socketId = getRealSocketId(item);
-
-			console.log('item: ', item, socketId);
-
-			message(socketId, allIDs.length, 'update-online-count');
-		});
-	} else {
-		socket.disconnect(0);
+	if (socket.data.token) {
+		delete socket.data.token;
 	}
+
+	if (socket.data.password) {
+		delete socket.data.password;
+	}
+
+	socket.broadcast.to(target).emit('webrtc-peer[message]', {
+		from: {
+			user: socket.data,
+			socketId: socket.id
+		},
+		message: message
+	});
+	console.log('message::', request);
+});
+
+peerServer.on('disconnect', (socket) => {
+	arrCommunicatingIds.delete(socket.id);
+
+	io.emit('updateOnline', {
+		all: Array.from(arrAllIds).length,
+		communicating: Array.from(arrCommunicatingIds).length
+	});
+	console.log('disconnect::', socket.data.id, socket.id);
 });
 
 http.listen(PORT, () => {

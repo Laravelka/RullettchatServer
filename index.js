@@ -63,49 +63,50 @@ peerServer.on('connect', async(socket) => {
 	if (checkUserToken[0] !== undefined) {
 		const user = checkUserToken[0];
 
-		if (arrAllIds.has(user.id)) {
-			socket.emit('errorMessage', {
+		delete user.password;
+		socket.data = user;
+
+		if (!arrAllIds.has(user.id)) {
+			/*socket.emit('errorMessage', {
 				type: 'two_window',
 				text: 'Нельзя открывать вторую вкладку!'
 			});
-			socket.disconnect(true);
-		} else {
-			delete user.password;
-
-			socket.data = user;
+			socket.disconnect(true);*/
 			arrAllIds.add(user.id, socket);
-
-			io.emit('updateOnline', {
-				all: Array.from(arrAllIds).length,
-				communicating: Array.from(arrCommunicatingIds).length
-			});
 		}
+		
+		io.emit('updateOnline', {
+			all: Array.from(arrAllIds).length,
+			communicating: Array.from(arrCommunicatingIds).length
+		});
 	} else {
+		socket.emit('errorMessage', {
+			type: 'auth_fail',
+			text: 'Ошибка авторизации!'
+		});
+
 		subscriber.on("message", function(channel, message) {
 			console.log(channel, JSON.parse(message));
 
 			if (channel == 'onLogin') {
 				const user = JSON.parse(message);
 
-				if (arrAllIds.has(user.id)) {
-					socket.emit('errorMessage', {
+				delete user.password;
+				socket.data = user;
+
+				if (!arrAllIds.has(user.id)) {
+					/*socket.emit('errorMessage', {
 						type: 'two_window',
 						text: 'Нельзя открывать вторую вкладку!'
-					});
-					socket.disconnect(true);
-				} else {
-					delete user.password;
-
-					socket.data = user;
+					});*/
 					arrAllIds.add(user.id, socket);
-
-					socket.emit('login', user);
-
-					io.emit('updateOnline', {
-						all: Array.from(arrAllIds).length,
-						communicating: Array.from(arrCommunicatingIds).length
-					});
 				}
+				socket.emit('login', user);
+
+				io.emit('updateOnline', {
+					all: Array.from(arrAllIds).length,
+					communicating: Array.from(arrCommunicatingIds).length
+				});
 			}
 		});
 		console.log(`socket.io err auth: ${id}`, [token]);
@@ -151,14 +152,13 @@ peerServer.on('message', (socket, request) => {
 		delete socket.data.password;
 	}
 
-	socket.broadcast.to(target).emit('webrtc-peer[message]', {
+	send(socket, target, {
 		from: {
 			user: socket.data,
 			socketId: socket.id
 		},
 		message: message
-	});
-	console.log('message::', request);
+	}, 'webrtc-peer[message]');
 });
 
 peerServer.on('disconnect', (socket) => {

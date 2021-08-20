@@ -34,7 +34,6 @@ router.post('/register', async(req, res, next) => {
                 created_at: moment().format("YYYY-MM-DD hh:mm:ss"),
                 updated_at: moment().format("YYYY-MM-DD hh:mm:ss")
             });
-
             publisher.publish("onLogin", JSON.stringify(user));
 
             res.status(200).json({

@@ -3,6 +3,7 @@ const express = require('express'),
     router = express.Router();
 
 const moment = require('moment');
+const jsonWebToken = require('jsonwebtoken');
 const { generateHash } = require('random-hash');
 const passwordHash = require('password-hash');
 
@@ -10,6 +11,23 @@ moment.locale('ru');
 
 const publisher = redis.createClient(6378, 'localhost');
 const UserModel = require("./../Models/User");
+const User = require("./../Models/User");
+
+router.get('/user', async(req, res, next) => {
+    const { query } = req;
+    const checkExists = await (new UserModel).find(query.id ? query.id : 0);
+
+    if (!checkExists[0]) {
+        res.status(400).json({
+            user: {},
+            message: 'Пользователь с таким ID не существует.'
+        });
+    } else {
+        res.status(200).json({
+            user: checkExists[0],
+        });
+    }
+});
 
 router.post('/register', async(req, res, next) => {
     const { body } = req;
@@ -34,6 +52,14 @@ router.post('/register', async(req, res, next) => {
                 created_at: moment().format("YYYY-MM-DD hh:mm:ss"),
                 updated_at: moment().format("YYYY-MM-DD hh:mm:ss")
             });
+
+            await (new UserModel).updateJwtToken(
+                user.id, jsonWebToken.sign({
+                    id: user.id,
+                    token: user.token
+                }, 'Qazxsw102')
+            );
+
             publisher.publish("onLogin", JSON.stringify(user));
 
             res.status(200).json({
@@ -61,6 +87,13 @@ router.post('/auth', async(req, res, next) => {
 
         if (checkExists[0]) {
             if (passwordHash.verify(body.password, checkExists[0].password)) {
+                await (new UserModel).updateJwtToken(
+                    checkExists[0].id, jsonWebToken.sign({
+                        id: checkExists[0].id,
+                        token: checkExists[0].token
+                    }, 'Qazxsw102')
+                );
+
                 const isUpdated = await (new UserModel).updateToken(checkExists[0].id, token);
 
                 if (isUpdated) {

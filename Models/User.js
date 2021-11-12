@@ -29,6 +29,12 @@ class User extends Model {
             .where({ id: id })
             .update({ token: token });
     }
+
+    async updateJwtToken(id, jwtToken) {
+        return await knex(User.tableName())
+            .where({ id: id })
+            .update({ 'jwt_token': jwtToken });
+    }
 }
 
 module.exports = User;

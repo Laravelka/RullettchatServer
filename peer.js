@@ -19,7 +19,7 @@ const cors = require('cors');
 const apiRoute = require('./routes/api');
 
 const path = __dirname + '/dist/';
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 8081;
 const peerServer = ExpressPeerServer(http, {
     key: 'rullettchatt',
     debug: true
